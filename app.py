@@ -335,7 +335,7 @@ def create_zip_from_images(pil_images, file_names, asset_id):
 
 # Streamlit UI
 # Add background image with overlay
-bg_img = get_base64_of_bin_file('C:\\ProjectsC\\Shine_Img_Gen\\BG.jpg')  # Use full path as specified
+bg_img = get_base64_of_bin_file('BG.jpg')  # Assumes BG.jpg is in repo root
 css = f"""
 <style>
 [data-testid="stAppViewContainer"] {{
@@ -470,4 +470,5 @@ if st.session_state.processed_data:
             )
         except Exception as e:
             st.error(f"Failed to create ZIP: {str(e)}")
+
             logging.error(f"ZIP creation error: {e}")
