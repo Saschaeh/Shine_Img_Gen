@@ -3,4 +3,5 @@ requests
 pillow
 numpy
 torch
-rembg
+rembg[cpu]
+onnxruntime
