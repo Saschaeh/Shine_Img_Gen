@@ -242,8 +242,8 @@ except Exception as e:
     logging.error(f"Failed to load logo: {e}")
     logo = None
 
-# Main processing function
-def process_instrument(asset_id, instrument, uploaded_images=None):
+# Main processing function - Updated for conditional processing
+def process_instrument(asset_id, instrument, uploaded_images=None, edit_uploaded=True, scrap_images=True):
     output_pil_images = []  # PIL for display and ZIP
     file_names = []  # For custom naming
     source_tags = []  # Track source (uploaded or scraped)
@@ -252,8 +252,8 @@ def process_instrument(asset_id, instrument, uploaded_images=None):
     used_urls = set()
     sanitized_instrument = sanitize_filename(instrument)
     
-    # Process uploaded images first if provided
-    if uploaded_images:
+    # Process uploaded images if selected and provided
+    if edit_uploaded and uploaded_images:
         for i, uploaded_file in enumerate(uploaded_images):
             if uploaded_file.type in ['image/jpeg', 'image/png']:
                 try:
@@ -268,38 +268,19 @@ def process_instrument(asset_id, instrument, uploaded_images=None):
                         source_tags.append("Uploaded")
                 except Exception as e:
                     logging.error(f"Failed to process uploaded image {uploaded_file.name}: {e}")
-        if len(output_pil_images) >= len(VIEWS) * NUM_IMAGES_PER_VIEW:
+        if len(output_pil_images) >= len(VIEWS) * NUM_IMAGES_PER_VIEW and not scrap_images:
             return output_pil_images, file_names, source_tags
     
-    # Fall back to SerpApi if not enough images from uploads
-    for view in VIEWS:
-        if len(output_pil_images) >= len(VIEWS) * NUM_IMAGES_PER_VIEW:
-            break
-        query = f"{instrument} high resolution product photo {view}"
-        urls = scrape_images(query)
-        
-        saved_for_view = 0
-        for url in urls:
-            if url in used_urls or len(output_pil_images) >= len(VIEWS) * NUM_IMAGES_PER_VIEW:
-                continue
-            raw_image = download_image(url)
-            if raw_image:
-                standardized = standardize_image(raw_image)
-                if standardized:
-                    used_urls.add(url)
-                    file_name = f"{sanitized_instrument}_{view.replace(' ', '_')}_{saved_for_view + 1}.jpg"
-                    logging.info(f"Processed: {file_name} (Source: {url.split('?')[0]})")
-                    output_pil_images.append(standardized)
-                    file_names.append(file_name)
-                    source_tags.append("Scraped")
-                    saved_for_view += 1
-                    if saved_for_view >= NUM_IMAGES_PER_VIEW:
-                        break
-        
-        if saved_for_view < NUM_IMAGES_PER_VIEW:
-            fallback_query = f"{instrument} high resolution product image {view}"
-            fallback_urls = scrape_images(fallback_query)
-            for url in fallback_urls:
+    # Fall back to SerpApi if selected and not enough images from uploads
+    if scrap_images:
+        for view in VIEWS:
+            if len(output_pil_images) >= len(VIEWS) * NUM_IMAGES_PER_VIEW:
+                break
+            query = f"{instrument} high resolution product photo {view}"
+            urls = scrape_images(query)
+            
+            saved_for_view = 0
+            for url in urls:
                 if url in used_urls or len(output_pil_images) >= len(VIEWS) * NUM_IMAGES_PER_VIEW:
                     continue
                 raw_image = download_image(url)
@@ -308,14 +289,34 @@ def process_instrument(asset_id, instrument, uploaded_images=None):
                     if standardized:
                         used_urls.add(url)
                         file_name = f"{sanitized_instrument}_{view.replace(' ', '_')}_{saved_for_view + 1}.jpg"
-                        logging.info(f"Processed (fallback): {file_name} (Source: {url.split('?')[0]})")
+                        logging.info(f"Processed: {file_name} (Source: {url.split('?')[0]})")
                         output_pil_images.append(standardized)
                         file_names.append(file_name)
                         source_tags.append("Scraped")
                         saved_for_view += 1
                         if saved_for_view >= NUM_IMAGES_PER_VIEW:
                             break
-        time.sleep(2)
+            
+            if saved_for_view < NUM_IMAGES_PER_VIEW:
+                fallback_query = f"{instrument} high resolution product image {view}"
+                fallback_urls = scrape_images(fallback_query)
+                for url in fallback_urls:
+                    if url in used_urls or len(output_pil_images) >= len(VIEWS) * NUM_IMAGES_PER_VIEW:
+                        continue
+                    raw_image = download_image(url)
+                    if raw_image:
+                        standardized = standardize_image(raw_image)
+                        if standardized:
+                            used_urls.add(url)
+                            file_name = f"{sanitized_instrument}_{view.replace(' ', '_')}_{saved_for_view + 1}.jpg"
+                            logging.info(f"Processed (fallback): {file_name} (Source: {url.split('?')[0]})")
+                            output_pil_images.append(standardized)
+                            file_names.append(file_name)
+                            source_tags.append("Scraped")
+                            saved_for_view += 1
+                            if saved_for_view >= NUM_IMAGES_PER_VIEW:
+                                break
+            time.sleep(2)
     
     return output_pil_images, file_names, source_tags
 
@@ -335,7 +336,7 @@ def create_zip_from_images(pil_images, file_names, asset_id):
 
 # Streamlit UI
 # Add background image with overlay
-bg_img = get_base64_of_bin_file('BG.jpg')  # Assumes BG.jpg is in repo root
+bg_img = get_base64_of_bin_file('BG.jpg')  # Use relative path for deployment
 css = f"""
 <style>
 [data-testid="stAppViewContainer"] {{
@@ -374,16 +375,25 @@ if 'instrument' not in st.session_state:
     st.session_state.instrument = "Alhambra 1C Spanish Guitar"
 if 'uploaded_files' not in st.session_state:
     st.session_state.uploaded_files = None
+if 'edit_uploaded' not in st.session_state:
+    st.session_state.edit_uploaded = True
+if 'scrap_images' not in st.session_state:
+    st.session_state.scrap_images = True
 
-# Input fields
+# Input fields and checkboxes
 asset_id = st.text_input("Asset ID", value=st.session_state.asset_id, key="asset_id_input")
 instrument = st.text_input("Instrument Name", value=st.session_state.instrument, key="instrument_input")
 uploaded_files = st.file_uploader("Upload your own images (JPG/PNG)", type=["jpg", "jpeg", "png"], accept_multiple_files=True, key="file_uploader")
 
-# Update session state with inputs
+edit_uploaded = st.checkbox("Edit Uploaded Images", value=st.session_state.edit_uploaded, key="edit_uploaded_checkbox")
+scrap_images = st.checkbox("Scrap for Images", value=st.session_state.scrap_images, key="scrap_images_checkbox")
+
+# Update session state with inputs and checkbox states
 st.session_state.asset_id = asset_id
 st.session_state.instrument = instrument
 st.session_state.uploaded_files = uploaded_files
+st.session_state.edit_uploaded = edit_uploaded
+st.session_state.scrap_images = scrap_images
 
 # Load API keys securely
 API_KEYS = list(st.secrets.get("api_keys", {}).values())
@@ -391,10 +401,12 @@ API_KEYS = list(st.secrets.get("api_keys", {}).values())
 if st.button("Process Images", key="process_button"):
     if not API_KEYS:
         st.error("API keys not configured. Add them in app settings.")
+    elif not (edit_uploaded or scrap_images):
+        st.error("Please select at least one option: Edit Uploaded Images or Scrap for Images.")
     else:
         with st.spinner("Fetching and processing images..."):
             try:
-                output_pil_images, file_names, source_tags = process_instrument(asset_id, instrument, uploaded_files)
+                output_pil_images, file_names, source_tags = process_instrument(asset_id, instrument, uploaded_files, edit_uploaded, scrap_images)
                 if output_pil_images:
                     # Store processed data in session state
                     st.session_state.processed_data = {
@@ -470,5 +482,4 @@ if st.session_state.processed_data:
             )
         except Exception as e:
             st.error(f"Failed to create ZIP: {str(e)}")
-
             logging.error(f"ZIP creation error: {e}")
